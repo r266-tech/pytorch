@@ -758,6 +758,12 @@ class AllocateLine(MemoryPlanningLine):
         self.scheduler_node_index = V.graph.scheduler.nodes.index(
             V.graph.scheduler.current_node
         )
+        from ..scheduler import NopKernelSchedulerNode
+
+        self.is_uninitialized = isinstance(
+            V.graph.scheduler.current_node,
+            NopKernelSchedulerNode,
+        )
 
     def should_reuse_buffer(self, free_line: FreeIfNotReusedLine, size: int) -> bool:
         if self.comm_buffer:
@@ -813,7 +819,9 @@ class AllocateLine(MemoryPlanningLine):
         if self.comm_buffer:
             self._codegen_comm_buffer(code)
         else:
-            line = self.wrapper.make_buffer_allocation(self.node)
+            line = self.wrapper.make_buffer_allocation(
+                self.node, is_uninitialized=self.is_uninitialized
+            )
             code.writeline(line)
 
     def _codegen_comm_buffer(self, code: IndentedBuffer) -> None:
@@ -3230,7 +3238,7 @@ class PythonWrapperCodegen(CodeGen):
             return repr(s)
 
     # The following methods are for memory management
-    def make_buffer_allocation(self, buffer: BufferLike):
+    def make_buffer_allocation(self, buffer: BufferLike, is_uninitialized: bool = True):
         device = buffer.get_device()
         dtype = buffer.get_dtype()
         shape = tuple(buffer.get_size())
@@ -3238,7 +3246,8 @@ class PythonWrapperCodegen(CodeGen):
         stride = tuple(buffer.get_stride())
         is_pinned = buffer.get_is_pinned()
         return self.make_allocation(
-            buffer.get_name(), device, dtype, shape, stride, allocation_shape, is_pinned
+            buffer.get_name(), device, dtype, shape, stride, allocation_shape, is_pinned,
+            is_uninitialized=is_uninitialized,
         )
 
     @cache_on_self
@@ -3250,7 +3259,8 @@ class PythonWrapperCodegen(CodeGen):
             self.imports.splice(import_str, strip=True)
 
     def make_allocation(
-        self, name, device, dtype, shape, stride, allocation_shape=None, is_pinned=False
+        self, name, device, dtype, shape, stride, allocation_shape=None, is_pinned=False,
+        is_uninitialized=True,
     ):
         if allocation_shape is None:
             allocation_shape = shape
@@ -3264,6 +3274,7 @@ class PythonWrapperCodegen(CodeGen):
         is_deterministic = (
             torch.are_deterministic_algorithms_enabled()
             and torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
+            and is_uninitialized
         )
 
         if torch._inductor.config.test_configs.track_memory_lifecycle:

@@ -1773,7 +1773,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     writeline(f"const {ctype} {var}[] = {int_array};")
         return var
 
-    def make_buffer_allocation(self, buffer):
+    # is_uninitialized accepted for API compatibility with AllocateLine.codegen
+    # but unused — the C++ wrapper doesn't do deterministic fills in codegen.
+    def make_buffer_allocation(self, buffer, is_uninitialized=True):
         return self.make_allocation(
             buffer.get_name(),
             buffer.get_device(),

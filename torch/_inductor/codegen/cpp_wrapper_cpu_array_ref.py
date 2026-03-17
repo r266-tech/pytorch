@@ -558,7 +558,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             else f"{buffer.get_name()}.reset();"
         )
 
-    def make_buffer_allocation(self, buffer):
+    # is_uninitialized: see comment in CppWrapperCpu.make_buffer_allocation
+    def make_buffer_allocation(self, buffer, is_uninitialized=True):
         return self.make_allocation(
             buffer.get_name(),
             buffer.get_device(),
