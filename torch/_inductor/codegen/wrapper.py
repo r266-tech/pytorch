@@ -3246,7 +3246,13 @@ class PythonWrapperCodegen(CodeGen):
         stride = tuple(buffer.get_stride())
         is_pinned = buffer.get_is_pinned()
         return self.make_allocation(
-            buffer.get_name(), device, dtype, shape, stride, allocation_shape, is_pinned,
+            buffer.get_name(),
+            device,
+            dtype,
+            shape,
+            stride,
+            allocation_shape,
+            is_pinned,
             is_uninitialized=is_uninitialized,
         )
 
@@ -3259,7 +3265,14 @@ class PythonWrapperCodegen(CodeGen):
             self.imports.splice(import_str, strip=True)
 
     def make_allocation(
-        self, name, device, dtype, shape, stride, allocation_shape=None, is_pinned=False,
+        self,
+        name,
+        device,
+        dtype,
+        shape,
+        stride,
+        allocation_shape=None,
+        is_pinned=False,
         is_uninitialized=True,
     ):
         if allocation_shape is None:

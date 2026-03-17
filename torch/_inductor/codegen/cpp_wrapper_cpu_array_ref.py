@@ -579,6 +579,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         stride,
         buffer_if_can_stack_allocate=None,
         is_pinned=False,
+        is_uninitialized=True,
     ):
         orig_stride = stride
         device_str = self.codegen_device(device)

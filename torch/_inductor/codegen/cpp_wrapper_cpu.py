@@ -1787,7 +1787,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
 
     def make_allocation(
-        self, name, device, dtype, shape, stride, allocation_shape=None, is_pinned=False
+        self, name, device, dtype, shape, stride, allocation_shape=None, is_pinned=False,
+        is_uninitialized=True,
     ):
         if allocation_shape is None:
             allocation_shape = shape
