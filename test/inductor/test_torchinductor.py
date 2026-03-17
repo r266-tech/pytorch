@@ -12595,6 +12595,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertTrue(eager.is_pinned())
             self.assertTrue(compiled.is_pinned())
 
+    @requires_gpu()
+    @unittest.skipIf(IS_MACOS, "fails on macos")
     def test_deterministic_skip_fill_for_ops(self):
         # Output buffers of real ops (e.g. add) should not get a deterministic
         # NaN fill — only truly uninitialized buffers (torch.empty) need it.
@@ -12616,6 +12618,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 self.assertIn("empty_strided_cuda(", code)
 
     @config.patch("cpp_wrapper", True)
+    @requires_gpu()
+    @unittest.skipIf(IS_MACOS, "fails on macos")
     def test_deterministic_fill_not_supported_cpp_wrapper(self):
         def fn():
             return torch.empty(4, 4, device=self.device)

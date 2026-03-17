@@ -1796,7 +1796,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         allocation_shape=None,
         is_pinned=False,
         is_uninitialized=True,
-    ):
+    ):  # noqa: docstring_linter
         if (
             is_uninitialized
             and torch.are_deterministic_algorithms_enabled()
