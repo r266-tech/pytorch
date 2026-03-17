@@ -1775,7 +1775,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     # is_uninitialized accepted for API compatibility with AllocateLine.codegen
     # but unused — the C++ wrapper doesn't do deterministic fills in codegen.
-    def make_buffer_allocation(self, buffer, is_uninitialized=True):
+    def make_buffer_allocation(self, buffer, is_uninitialized=False):
         return self.make_allocation(
             buffer.get_name(),
             buffer.get_device(),
@@ -1784,6 +1784,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             buffer.get_stride(),
             V.graph.get_allocation_size(buffer),
             buffer.get_is_pinned(),
+            is_uninitialized=is_uninitialized,
         )
 
     def make_allocation(
@@ -1795,7 +1796,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         stride,
         allocation_shape=None,
         is_pinned=False,
-        is_uninitialized=True,
+        is_uninitialized=False,
     ):  # noqa: docstring_linter
         if (
             is_uninitialized

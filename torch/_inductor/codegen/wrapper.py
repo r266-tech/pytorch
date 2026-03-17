@@ -3238,7 +3238,9 @@ class PythonWrapperCodegen(CodeGen):
             return repr(s)
 
     # The following methods are for memory management
-    def make_buffer_allocation(self, buffer: BufferLike, is_uninitialized: bool = True):
+    def make_buffer_allocation(
+        self, buffer: BufferLike, is_uninitialized: bool = False
+    ):
         device = buffer.get_device()
         dtype = buffer.get_dtype()
         shape = tuple(buffer.get_size())
@@ -3273,7 +3275,7 @@ class PythonWrapperCodegen(CodeGen):
         stride,
         allocation_shape=None,
         is_pinned=False,
-        is_uninitialized=True,
+        is_uninitialized=False,
     ):
         if allocation_shape is None:
             allocation_shape = shape
