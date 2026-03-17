@@ -1790,6 +1790,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self, name, device, dtype, shape, stride, allocation_shape=None, is_pinned=False,
         is_uninitialized=True,
     ):
+        if (
+            is_uninitialized
+            and torch.are_deterministic_algorithms_enabled()
+            and torch.utils.deterministic.fill_uninitialized_memory
+        ):
+            raise RuntimeError(
+                "torch.use_deterministic_algorithms(True) with fill_uninitialized_memory "
+                "is not supported with cpp_wrapper. Use the default Python wrapper instead."
+            )
         if allocation_shape is None:
             allocation_shape = shape
 

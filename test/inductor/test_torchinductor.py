@@ -12615,6 +12615,17 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             else:
                 self.assertIn("empty_strided_cuda(", code)
 
+    @config.patch("cpp_wrapper", True)
+    def test_deterministic_fill_not_supported_cpp_wrapper(self):
+        def fn():
+            return torch.empty(4, 4, device=self.device)
+
+        with DeterministicGuard(True, fill_uninitialized_memory=True):
+            with self.assertRaisesRegex(
+                RuntimeError, "not supported with cpp_wrapper"
+            ):
+                torch.compile(fn, fullgraph=True)()
+
     def test_inplace_resize_as(self):
         def fn(x, y):
             x.resize_as_(y)
