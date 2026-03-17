@@ -1787,13 +1787,20 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
 
     def make_allocation(
-        self, name, device, dtype, shape, stride, allocation_shape=None, is_pinned=False,
+        self,
+        name,
+        device,
+        dtype,
+        shape,
+        stride,
+        allocation_shape=None,
+        is_pinned=False,
         is_uninitialized=True,
     ):
         if (
             is_uninitialized
             and torch.are_deterministic_algorithms_enabled()
-            and torch.utils.deterministic.fill_uninitialized_memory
+            and torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
         ):
             raise RuntimeError(
                 "torch.use_deterministic_algorithms(True) with fill_uninitialized_memory "
