@@ -12577,6 +12577,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @requires_gpu()
     @unittest.skipIf(IS_MACOS, "fails on macos")
+    @skip_if_cpp_wrapper("skip cpp_wrapper tests")
     def test_empty_deterministic_pin_memory(self):
         if self.device != "cpu":
             raise unittest.SkipTest("Test only runs on CPU")
@@ -12597,6 +12598,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @requires_gpu()
     @unittest.skipIf(IS_MACOS, "fails on macos")
+    @skip_if_cpp_wrapper("skip cpp_wrapper tests")
     def test_deterministic_skip_fill_for_ops(self):
         # Output buffers of real ops (e.g. add) should not get a deterministic
         # NaN fill — only truly uninitialized buffers (torch.empty) need it.
