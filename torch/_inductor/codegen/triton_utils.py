@@ -66,10 +66,6 @@ def signature_of(arg: KernelArgType, *, size_dtype: str | None) -> str:
                 # From triton/runtime/jit.py
                 # `None` is nullptr.  Implicitly convert to *i8.
                 return "*i8"
-        elif _arg_equals_1(arg) and triton_version_uses_attrs_dict():
-            # In new versions of Triton, if we have an equal-to-1 arg that's marked as a constant,
-            # it should be marked as "constexpr" in the signature.
-            return "constexpr"
         elif isinstance(arg.expr, (float, sympy.Float)):
             # Python floats are natively fp64, so use fp64 to preserve precision
             return "fp64" if config._use_fp64_for_unbacked_floats else "fp32"
