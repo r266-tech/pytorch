@@ -78,21 +78,17 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
 
-# We define each template kernel in a separate file, named after the
-# input to load_kernel_template (e.g. triton_mm for
-# templates/triton_mm.py.jinja). If you are adding a new template,
-# follow that pattern and add a new file in the templates folder.
+# We define each template kernel in a separate file which is the name of the input to load_kernel_template
+# (e.g. triton_mm for templates/triton_mm.py.jinja).
+# If you are adding a new template, please follow that pattern and add a new file with your implementation in the templates folder.
 mm_template = TritonTemplate(
     name="mm",
     grid=mm_grid,
     source=load_kernel_template("triton_mm")
     if (torch.version.hip is None) or triton_version >= "3.3.0"
-    # FIXME: To get around rocm failures like
-    # https://github.com/pytorch/pytorch/actions/runs/13123783322/job/36617154943  # noqa: B950
-    # The only difference between the two templates is
-    # M >= BLOCK_M and N >= BLOCK_N checking.
-    # See more details in
-    # https://github.com/pytorch/pytorch/pull/146293
+    # FIXME: To get around rocm failures like https://github.com/pytorch/pytorch/actions/runs/13123783322/job/36617154943
+    # The only difference between the two templates is M >= BLOCK_M and N >= BLOCK_N checking.
+    # See more details in https://github.com/pytorch/pytorch/pull/146293
     else load_kernel_template("triton_mm_rocm"),
     cache_codegen_enabled_for_template=True,
     prologue_loads_all_inputs=True,

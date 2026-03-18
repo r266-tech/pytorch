@@ -2728,7 +2728,9 @@ def forward(self, arg0_1, arg1_1):
         res, code = run_and_get_code(fn_c, x)
         self.assertEqual(expected, res)
 
-        # numel=1 is handled via attrs specialization, not constants
+        FileCheck().check("triton_meta=").check("'constants':").check("'numel': 1").run(
+            code[0]
+        )
         FileCheck().check("triton_meta=").check("'constants':").check(
             "'add_amount': None"
         ).run(code[0])
@@ -2737,7 +2739,7 @@ def forward(self, arg0_1, arg1_1):
         ).run(code[0])
 
         FileCheck().check("triton_meta=").check("'signature':").check(
-            "'numel': 'i32'"
+            "'numel': 'constexpr'"
         ).run(code[0])
         FileCheck().check("triton_meta=").check("'signature':").check(
             "'add_amount': 'constexpr'"

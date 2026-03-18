@@ -2630,6 +2630,7 @@ class PythonWrapperCodegen(CodeGen):
         signature: list[KernelArgType] = []
         constants: dict[str, Any] = {}
         arg_indices: list[int] = []
+        equal_to_1_args: list[str] = []
 
         def add_to_signature(idx, arg):
             signature.append(arg)
@@ -2654,12 +2655,14 @@ class PythonWrapperCodegen(CodeGen):
 
                 if equals_1:
                     if triton_version_uses_attrs_dict():
-                        # Triton 3.7+ treats constants entries as constexpr.
-                        # equal_to_1 specialization is handled via attrs, not constants.
-                        add_to_signature(idx, arg)
+                        # new versions of triton: add the equal-to-1 arg in the signature (labeled as "constexpr"),
+                        #                         and add the arg as a constant.
+                        # new versions of triton: add the equal-to-1 arg in the signature (labeled as, e.g., "i32"),
+                        #                         and add the arg as a constant.
+                        add_to_signature(idx, ConstexprArg(name=arg.name))
                     else:
                         add_to_signature(idx, arg)
-                        constants[arg.name] = 1
+                    constants[arg.name] = 1
                 elif equals_none:
                     if triton_version_uses_attrs_dict():
                         # new versions of triton: add the none arg in the signature (as a constexpr arg) and as a constant
@@ -2739,7 +2742,17 @@ class PythonWrapperCodegen(CodeGen):
         triton_meta: dict[str, Any] = {
             "signature": triton_signature,
             "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
-            "constants": constants,
+            # Triton compiler includes equal_to_1 args into constants even
+            # when they are not constexpr. otherwise there may be a segfault
+            # during launching the Inductor-compiled Triton kernel.
+            # TODO(aakhundov): add None args to constants, too. currently, this
+            # causes CUDA errors in test_aot_inductor.test_triton_kernel_with_none_input.
+            # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
+            # https://github.com/triton-lang/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
+            "constants": {
+                **constants,
+                **dict.fromkeys(equal_to_1_args, 1),
+            },
             "configs": [
                 config_of(
                     signature,
