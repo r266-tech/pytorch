@@ -25,9 +25,9 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_LINUX,
+    requires_mkl,
     skipIfXpu,
     TEST_ACL,
-    TEST_MKL,
     xfailIfACL,
 )
 from torch.testing._internal.inductor_utils import (
@@ -824,7 +824,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self.assertEqual(metrics.generated_kernel_count, expected_kernel_count)
 
     @reduced_f32_on_and_off()
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     def test_linear_fp32(self, device="cpu"):
         self.device = device
 
@@ -848,7 +848,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
             self._test_common(mod, (v,), matcher_check_fn)
 
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     def test_linear_input_non_contiguous_3D_wo_bias(self, device="cpu"):
         self.device = device
 
@@ -1562,7 +1562,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             om(*example_inputs)
             om(*example_inputs)
 
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @xfailIfACL
     @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     def test_reproduce_121253_issue_addmm_fusion_check(self):

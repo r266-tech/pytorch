@@ -1708,6 +1708,8 @@ def xpassIfTorchDynamo_np(func):
     return func if TEST_WITH_TORCHDYNAMO else unittest.expectedFailure(func)
 
 
+requires_mkl = unittest.skipUnless(TEST_MKL, "Test requires MKL")
+
 def xfailIfACL(func):
     return unittest.expectedFailure(func) if TEST_ACL else func
 

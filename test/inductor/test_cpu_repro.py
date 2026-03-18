@@ -40,9 +40,9 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     MI200_ARCH,
     parametrize,
+    requires_mkl,
     skipIfRocmArch,
     slowTest,
-    TEST_MKL,
     xfailIf,
     xfailIfS390X,
 )
@@ -350,7 +350,7 @@ class CPUReproTests(TestCase):
         torch.testing.assert_close(w_comp.grad, grad_w_eager)
 
     @config.patch(freezing=True)
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @patch("torch.cuda.is_available", lambda: False)
     def test_mkl_linear(self):
         dtypes = [torch.float32]
