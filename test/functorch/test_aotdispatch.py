@@ -6909,7 +6909,6 @@ def forward(self, primals_1, tangents_1):
                 subclass_inp_meta=[],
                 subclass_fw_graph_out_meta=[],
                 subclass_tangent_meta=[],
-                is_train=False,
                 traced_tangents_descs=[],
             )
             meta.tokens = {EffectType.ORDERED: torch.tensor([])}
@@ -6937,6 +6936,36 @@ def forward(self, primals_1, tangents_1):
             )
         finally:
             handle.destroy()
+
+    def test_collect_metadata_subclass_fw_outs_follow_mutation_type(self):
+        from torch._functorch._aot_autograd.collect_metadata_analysis import (
+            run_functionalized_fw_and_collect_metadata,
+        )
+        from torch._functorch._aot_autograd.descriptors import PlainAOTInput
+
+        def f(x):
+            x.add_(1)
+            return [torch.sin(x)]
+
+        subclass_arg = TwoTensor(torch.ones(2), torch.ones(2))
+
+        keep_input_mutations_meta = run_functionalized_fw_and_collect_metadata(
+            f,
+            flat_args_descs=[PlainAOTInput(0)],
+            keep_input_mutations=True,
+            static_input_indices=[],
+        )(subclass_arg)
+        self.assertEqual(keep_input_mutations_meta.mutated_inp_runtime_indices, [])
+        self.assertEqual(len(keep_input_mutations_meta.subclass_fw_graph_out_meta), 1)
+
+        out_of_graph_mutation_meta = run_functionalized_fw_and_collect_metadata(
+            f,
+            flat_args_descs=[PlainAOTInput(0)],
+            keep_input_mutations=False,
+            static_input_indices=[],
+        )(subclass_arg)
+        self.assertEqual(out_of_graph_mutation_meta.mutated_inp_runtime_indices, [0])
+        self.assertEqual(len(out_of_graph_mutation_meta.subclass_fw_graph_out_meta), 2)
 
 
 class TestAOTDispatch(AOTTestCase):
