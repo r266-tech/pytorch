@@ -500,42 +500,6 @@ def flatten_args_detach(args):
     return flatten_args(args, detach=True)
 
 
-# Legacy validation functions (kept for backward compatibility with existing stage.py)
-# These will be removed in the next commit when stage.py is updated.
-class PipeliningShapeError(RuntimeError):
-    """Shape mismatch between configured and runtime values."""
-
-
-def validate_tensor_metadata(desc, expected, given):
-    if not expected.shape == given.shape:
-        raise PipeliningShapeError(
-            f"{desc} has a shape mismatch: expected {expected.shape} actual {given.shape}"
-        )
-    if not expected.dtype == given.dtype:
-        raise PipeliningShapeError(
-            f"{desc} has a dtype mismatch: expected {expected.dtype} actual {given.dtype}"
-        )
-    if not expected.stride() == given.stride():
-        raise PipeliningShapeError(
-            f"{desc} has a stride mismatch: expected {expected.stride()} actual {given.stride()}"
-        )
-
-
-def validate_tensors_metadata(
-    desc,
-    expected_tensors: list[torch.Tensor] | tuple[torch.Tensor, ...],
-    actual_tensors: list[torch.Tensor] | tuple[torch.Tensor, ...],
-):
-    if len(expected_tensors) != len(actual_tensors):
-        raise PipeliningShapeError(
-            f"{desc}: Number of values ({len(actual_tensors)}) does not match expected number ({len(expected_tensors)})"
-        )
-    for i in range(len(expected_tensors)):
-        validate_tensor_metadata(
-            f"{desc}: value {i}", expected_tensors[i], actual_tensors[i]
-        )
-
-
 def generate_stage_to_rank_mapping(
     pp_size: int, num_stages: int, style: str = "loop"
 ) -> dict[int, int]:
@@ -831,6 +795,69 @@ def validate_metadata(
             )
 
     return diffs
+
+
+def validate_tensors_metadata(
+    desc: str,
+    expected_metas: tuple[TensorMeta | None, ...],
+    actuals: tuple[torch.Tensor | TensorMeta | None, ...],
+    *,
+    skip_none_actuals: bool = False,
+    warn_on_mismatch: bool = False,
+) -> None:
+    """
+    Validate that a collection of actual tensors/metadata match expected metadata.
+    This is a convenience wrapper for validating lists/tuples of tensors or metadata.
+
+    Args:
+        desc: Description for error messages.
+        expected_metas: Expected tensor metadata (tuple of _TensorMeta/_DTensorMeta or None).
+        actuals: Actual tensors or metadata to validate.
+        skip_none_actuals: If True, skip validation for None actual tensors. This is useful
+            for backward pass validation where gradients can legitimately be None
+            for non-differentiable outputs.
+        warn_on_mismatch: If True, issue warnings instead of raising errors.
+
+    Raises:
+        PipeliningMetadataError: If lengths don't match or any tensor metadata mismatches
+            (unless warn_on_mismatch=True).
+    """
+    if len(expected_metas) != len(actuals):
+        msg = (
+            f"{desc}: Number of values ({len(actuals)}) does not match "
+            f"expected number ({len(expected_metas)})"
+        )
+        if warn_on_mismatch:
+            warnings.warn(f"{msg}. Using dynamic metadata.", UserWarning)
+            return
+        raise PipeliningMetadataError(msg)
+
+    for i, (expected, actual) in enumerate(zip(expected_metas, actuals, strict=True)):
+        # Handle None cases
+        if expected is None and actual is None:
+            continue
+        if expected is None:
+            msg = f"{desc} [{i}]: expected None, got {type(actual).__name__}"
+            if warn_on_mismatch:
+                warnings.warn(f"{msg}. Using dynamic metadata.", UserWarning)
+                continue
+            raise PipeliningMetadataError(msg)
+        if actual is None:
+            if skip_none_actuals:
+                continue
+            msg = f"{desc} [{i}]: expected {type(expected).__name__}, got None"
+            if warn_on_mismatch:
+                warnings.warn(f"{msg}. Using dynamic metadata.", UserWarning)
+                continue
+            raise PipeliningMetadataError(msg)
+
+        validate_metadata(
+            f"{desc} [{i}]",
+            expected,
+            actual,
+            warn_on_mismatch=warn_on_mismatch,
+            raise_on_mismatch=not warn_on_mismatch,
+        )
 
 
 def validate_static_dtensor_grad_correspondence(
