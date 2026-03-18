@@ -495,42 +495,6 @@ def flatten_args_detach(args):
     return flatten_args(args, detach=True)
 
 
-# Legacy validation functions (kept for backward compatibility with existing stage.py)
-# These will be removed in the next commit when stage.py is updated.
-class PipeliningShapeError(RuntimeError):
-    """Shape mismatch between configured and runtime values."""
-
-
-def validate_tensor_metadata(desc, expected, given):
-    if not expected.shape == given.shape:
-        raise PipeliningShapeError(
-            f"{desc} has a shape mismatch: expected {expected.shape} actual {given.shape}"
-        )
-    if not expected.dtype == given.dtype:
-        raise PipeliningShapeError(
-            f"{desc} has a dtype mismatch: expected {expected.dtype} actual {given.dtype}"
-        )
-    if not expected.stride() == given.stride():
-        raise PipeliningShapeError(
-            f"{desc} has a stride mismatch: expected {expected.stride()} actual {given.stride()}"
-        )
-
-
-def validate_tensors_metadata(
-    desc,
-    expected_tensors: list[torch.Tensor] | tuple[torch.Tensor, ...],
-    actual_tensors: list[torch.Tensor] | tuple[torch.Tensor, ...],
-):
-    if len(expected_tensors) != len(actual_tensors):
-        raise PipeliningShapeError(
-            f"{desc}: Number of values ({len(actual_tensors)}) does not match expected number ({len(expected_tensors)})"
-        )
-    for i in range(len(expected_tensors)):
-        validate_tensor_metadata(
-            f"{desc}: value {i}", expected_tensors[i], actual_tensors[i]
-        )
-
-
 def generate_stage_to_rank_mapping(
     pp_size: int, num_stages: int, style: str = "loop"
 ) -> dict[int, int]:
