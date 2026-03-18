@@ -661,7 +661,9 @@ use_dce: bool = True
 # Use fx graph passes
 use_pre_grad_passes: bool = True
 
-pre_grad_pass_timing: Literal["early", "late"] = "early"
+
+pre_grad_pass_timing: Literal["early", "late", "default"] = "default"
+
 
 use_joint_graph_passes: bool = True
 use_post_grad_passes: bool = True
