@@ -52,6 +52,7 @@ from .ctx_manager import (
 from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
+    DictBuiltinVariable,
     DictItemsVariable,
     DictKeySetVariable,
     DunderDictVariable,
@@ -96,6 +97,7 @@ from .higher_order_ops import (
 from .iter import (
     CountIteratorVariable,
     FilterVariable,
+    IterBuiltinVariable,
     IteratorVariable,
     ItertoolsVariable,
     MapVariable,
@@ -184,6 +186,7 @@ __all__ = [
     "CONSTANT_VARIABLE_TRUE",
     "ConstantVariable",
     "ConstDictVariable",
+    "DictBuiltinVariable",
     "ContextWrappingVariable",
     "CountIteratorVariable",
     "CreateTMADescriptorExperimentalVariable",
@@ -201,6 +204,7 @@ __all__ = [
     "GradModeVariable",
     "InspectSignatureVariable",
     "InspectVariable",
+    "IterBuiltinVariable",
     "IteratorVariable",
     "ItertoolsVariable",
     "LambdaVariable",

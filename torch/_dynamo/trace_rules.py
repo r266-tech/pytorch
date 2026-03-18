@@ -58,6 +58,8 @@ from .utils import (
 )
 from .variables import (
     BuiltinVariable,
+    DictBuiltinVariable,
+    IterBuiltinVariable,
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
     InspectSignatureVariable,
@@ -3981,6 +3983,10 @@ def lookup_callable(obj: Callable[..., Any]) -> type[VariableTracker] | None:
         return TorchInGraphFunctionVariable
     if is_polyfilled_callable(obj):
         return PolyfilledFunctionVariable
+    if obj is dict:
+        return DictBuiltinVariable
+    if obj is iter:
+        return IterBuiltinVariable
     if is_builtin_callable(obj):
         return BuiltinVariable
     return None
