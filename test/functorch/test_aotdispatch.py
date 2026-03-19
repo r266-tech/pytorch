@@ -6947,7 +6947,13 @@ def forward(self, primals_1, tangents_1):
             x.add_(1)
             return [torch.sin(x)]
 
-        subclass_arg = TwoTensor(torch.ones(2), torch.ones(2))
+        fake_mode = FakeTensorMode()
+        # Metadata collection expects fake inputs, including the inner tensors
+        # carried by wrapper subclasses.
+        subclass_arg = TwoTensor(
+            fake_mode.from_tensor(torch.ones(2)),
+            fake_mode.from_tensor(torch.ones(2)),
+        )
 
         keep_input_mutations_meta = run_functionalized_fw_and_collect_metadata(
             f,
