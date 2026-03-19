@@ -245,6 +245,7 @@ class TestCKBackend(TestCase):
 
     # No valid choices error
     @skipIfRocm(msg="Fails with Triton 3.7")
+    @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
     @skipIfRocm(msg="Numerical accuracy errors in CK backend on gfx950 as of 06/03/26")
     @parametrize(
