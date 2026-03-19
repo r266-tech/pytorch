@@ -511,6 +511,7 @@ def propagate_general_copy_metadata(
         aten.squeeze.dim,
         aten.gather.default,
         aten.scatter.value,
+        aten.scatter_add.default,
     ]
 )
 def propagate_general_copy_metadata_ignore_broadcast(out_node: Node) -> _HandlerRetType:
@@ -759,15 +760,45 @@ def propagate_expand(expand_node: Node) -> _HandlerRetType:
     input_node = expand_node.args[0]
     assert isinstance(input_node, Node)
 
-    if input_node.meta["val"].numel() != 1:
+    input_ft = get_fake_tensor_from_node_arg(input_node)
+    assert input_ft is not None
+    output_ft = get_fake_tensor_from_node_arg(expand_node)
+    assert output_ft is not None
+    input_shape = list(input_ft.shape)
+    output_shape = list(output_ft.shape)
+
+    if input_ft.numel() == 1:
+        # Scalar input: combined fwd/bwd rule
+        output_meta = get_chunking_meta(expand_node)
+        if output_meta is None:
+            return _bool_to_status(False)
+        return _bool_to_status(set_chunking_meta(input_node))
+
+    # Non-scalar expand: propagate chunk_dim through if the expand only
+    # broadcasts dimensions other than the chunk dim.
+    def fwd() -> PropagateStatus:
+        assert isinstance(input_node, Node)
+        input_meta = get_chunking_meta(input_node)
+        if input_meta is None:
+            return _bool_to_status(False)
+        if input_meta.chunk_dim is None:
+            return _bool_to_status(copy_chunking_meta(expand_node, input_meta))
+        if input_shape[input_meta.chunk_dim] == output_shape[input_meta.chunk_dim]:
+            return _bool_to_status(copy_chunking_meta(expand_node, input_meta))
         return PropagateStatus.FAIL
 
-    # Combined fwd/bwd rule
-    output_meta = get_chunking_meta(expand_node)
-    if output_meta is None:
-        return _bool_to_status(False)
+    def bwd() -> PropagateStatus:
+        assert isinstance(input_node, Node)
+        output_meta = get_chunking_meta(expand_node)
+        if output_meta is None:
+            return _bool_to_status(False)
+        if output_meta.chunk_dim is None:
+            return _bool_to_status(copy_chunking_meta(input_node, output_meta))
+        if input_shape[output_meta.chunk_dim] == output_shape[output_meta.chunk_dim]:
+            return _bool_to_status(copy_chunking_meta(input_node, output_meta))
+        return PropagateStatus.FAIL
 
-    return _bool_to_status(set_chunking_meta(input_node))
+    return fwd(), bwd()
 
 
 @register_propagate_rule(
