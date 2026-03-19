@@ -833,11 +833,8 @@ from a multi-output view call"
             for inp, info in zip(flat_f_args, input_info)
             if info.mutation_type == MutationType.MUTATED_OUT_GRAPH
         ]
-        # This logic (annoyingly) re-figures out exactly what the outputs to the compiled fw graph will be.
-        # When handling subclasses, we need info about **all** outputs of compiled forward graph,
-        # so we know precisely which graph outputs to wrap back into tensor subclasses
-        # Build this directly from the inferred mutation/intermediate-base metadata
-        # so callers do not need to thread through a separate training/inference flag.
+        # Build the full list of forward graph outputs so the subclass wrapping
+        # code knows exactly which graph outputs to wrap back into subclasses.
         #
         # Including intermediate_bases unconditionally is safe: they are only
         # populated when outputs require grad (line ~539), so they are naturally
