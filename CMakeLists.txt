@@ -1,4 +1,11 @@
 cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
+# Allow CMake 4.x to use policies from the 3.x era. This avoids failures in
+# bundled third-party projects (protobuf, benchmark, ...) whose
+# cmake_minimum_required predates 3.5, and sidesteps stricter checks (e.g.
+# shared-library cyclic dependencies) added in CMake 4.x.
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0")
+  set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+endif()
 
 # Use compiler ID "AppleClang" instead of "Clang" for XCode. Not setting this
 # sometimes makes XCode C compiler gets detected as "Clang", even when the C++
