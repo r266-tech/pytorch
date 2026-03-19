@@ -1079,7 +1079,7 @@ def identify_accessed_tensors(
     2) Parses the TTIR and creates a control flow graph
     3) Analyzes the graph to detect which input tensors are read and/or written
     """
-    
+
     from torch._inductor.dependencies import Dep, ReadWrites, StarDep
     from torch._inductor.ir import TensorBox
 
@@ -1444,7 +1444,13 @@ def get_mutated_tensors(
     tensor_accesses = identify_accessed_tensors(
         kernel, {**kwargs, **constant_args}, tma_descriptor_metadata
     )
-    return [dep.name for dep in tensor_accesses.read_writes.writes]
+    # Filter to only tensor kwargs: with Triton 3.7+, ordered_arg_names
+    # includes scalars, so writes may reference non-tensor args like SymInts.
+    return [
+        dep.name
+        for dep in tensor_accesses.read_writes.writes
+        if isinstance(kwargs.get(dep.name), Tensor)
+    ]
 
 
 @triton_kernel_wrapper_mutation.py_functionalize_impl

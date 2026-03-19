@@ -247,6 +247,7 @@ class TestCKBackend(TestCase):
     @skipIfRocm(msg="Fails with Triton 3.7")
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
     @skipIfRocm(msg="Numerical accuracy errors in CK backend on gfx950 as of 06/03/26")
+    @parametrize(
         "x_shape", ([4096, 2048], [2048], [4096, 1])
     )  # NOTE: the first two shapes create "Tensor-likes are not close" errors
     def test_max_autotune_addmm(self, max_autotune_gemm_backends, x_shape):
