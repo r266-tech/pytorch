@@ -158,8 +158,6 @@ else:
     from torch._inductor.fb.utils import log_optimus_to_scuba, time_and_log
 
 if TYPE_CHECKING:
-    import types
-
     from torch._functorch._aot_autograd.schemas import (
         FQN,
         GraphInputName,
@@ -2274,9 +2272,10 @@ class CompilerConfigExtra:
     cudagraphs_bwd_override: bool | None = None
 
 
-def create_compiler_config_extra(
-    config: types.ModuleType, gm_meta: dict[str, Any] | None = None
-) -> CompilerConfigExtra:
+def create_compiler_config_extra(mod: GraphModule) -> CompilerConfigExtra:
+    assert mod is not None and isinstance(mod, GraphModule)
+    gm_meta = mod.meta
+
     # Although cudagraphs may have been enabled via config, various
     # conditions (which are tested within the bowels of Inductor) may
     # force cudagraphs to be disabled.  This mutable box lets us retrieve
@@ -2751,8 +2750,7 @@ def _compile_fx_main(
 
         num_example_inputs = len(example_inputs_)
 
-        gm_meta = model_.meta if isinstance(model_, GraphModule) else None
-        compiler_config_extra = create_compiler_config_extra(config, gm_meta)
+        compiler_config_extra = create_compiler_config_extra(model_)
 
         decompositions = (
             decompositions if decompositions is not None else select_decomp_table()
