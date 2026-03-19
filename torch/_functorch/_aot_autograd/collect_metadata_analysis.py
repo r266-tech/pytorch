@@ -838,6 +838,13 @@ from a multi-output view call"
         # so we know precisely which graph outputs to wrap back into tensor subclasses
         # Build this directly from the inferred mutation/intermediate-base metadata
         # so callers do not need to thread through a separate training/inference flag.
+        #
+        # Including intermediate_bases unconditionally is safe: they are only
+        # populated when outputs require grad (line ~539), so they are naturally
+        # empty during pure inference.  In the "downgrade from training to
+        # inference" path, num_intermediate_bases > 0 is already gated behind
+        # `assert not req_subclass_dispatch` (aot_autograd.py), so the subclass
+        # wrapping code that consumes subclass_fw_graph_out_meta never sees them.
         f_fw_graph_outs = [*f_mutated_inputs, *flat_f_outs, *intermediate_bases]
         fw_graph_outs = pytree.tree_map(from_fun, f_fw_graph_outs)
 
