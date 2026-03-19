@@ -835,7 +835,6 @@ from a multi-output view call"
         ]
         # Build the full list of forward graph outputs so the subclass wrapping
         # code knows exactly which graph outputs to wrap back into subclasses.
-        #
         # Including intermediate_bases unconditionally is safe: they are only
         # populated when outputs require grad (line ~539), so they are naturally
         # empty during pure inference.  In the "downgrade from training to
