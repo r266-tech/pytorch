@@ -23,6 +23,7 @@ requires = [
 build-backend = "scikit_build_core.build"
 
 [tool.scikit-build]
+experimental = true
 build-dir = "build"
 
 [tool.scikit-build.cmake]
@@ -41,6 +42,12 @@ build-type = ""
 provider = "scikit_build_core.metadata.regex"
 input = "version.txt"
 regex = "^(?P<value>.+)$"
+
+[tool.scikit-build.metadata.dependencies]
+# Reads PYTORCH_EXTRA_INSTALL_REQUIREMENTS env var (pipe-separated PEP 508
+# strings) to inject CUDA/ROCm/XPU pip package dependencies into the wheel.
+provider = "dependencies"
+provider-path = "tools/metadata"
 
 [tool.scikit-build.wheel]
 # CMake install destinations (lib/, include/, share/cmake/) are relative to
@@ -127,15 +134,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
 ]
-dynamic = ["version"]
-dependencies = [
-    "filelock",
-    "typing-extensions>=4.10.0",
-    "sympy>=1.13.3",
-    "networkx>=2.5.1",
-    "jinja2",
-    "fsspec>=0.8.5",
-]
+dynamic = ["version", "dependencies"]
 
 [project.scripts]
 torchrun = "torch.distributed.run:main"
