@@ -1004,6 +1004,15 @@ def analyze_kernel_access(
                 write_stack.extend(op.args[idx] for idx in WRITE_OPS.get(op.name, []))
                 read_stack.extend(op.args[idx] for idx in READ_OPS.get(op.name, []))
 
+    # For these ops, only the first argument (base pointer) refers to actual
+    # memory. The remaining arguments are shape/stride/offset metadata and
+    # should not be traced during mutation analysis.
+    POINTER_ONLY_OPS = {
+        "tt.make_tensor_ptr",
+        "tt.advance",
+        "tt.make_tensor_descriptor",
+    }
+
     def _find_arg_access_count(
         initial_stack: list[Param | Intermediate],
         skip_loads: bool,
@@ -1026,7 +1035,10 @@ def analyze_kernel_access(
                 for op in ops[arg]:
                     if skip_loads and op.name == "tt.load":
                         continue
-                    stack.extend(op.args)
+                    if op.name in POINTER_ONLY_OPS:
+                        stack.append(op.args[0])
+                    else:
+                        stack.extend(op.args)
 
         return access_count
 
