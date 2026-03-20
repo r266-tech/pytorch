@@ -22,12 +22,13 @@ function do_install() {
         git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git ${tmp_dir}/rocm-systems
         cd ${tmp_dir}/rocm-systems
         git sparse-checkout set --cone projects/rocshmem
-        git checkout ${ROCSHMEM_VERSION}
+        # git checkout ${ROCSHMEM_VERSION}
+        git checkout edgar/stdc++fs-fix
 
         cd ${tmp_dir}/rocm-systems/projects/rocshmem
         mkdir build
         cd build
-        INSTALL_PREFIX="${rocm_dir}" ../scripts/build_configs/all_backends
+        INSTALL_PREFIX="${rocm_dir}" LDFLAGS='-lstdc++fs' ../scripts/build_configs/all_backends
 
         cd ${curr_dir}
 
