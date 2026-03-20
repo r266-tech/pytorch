@@ -97,8 +97,8 @@ from .higher_order_ops import (
 from .iter import (
     CountIteratorVariable,
     FilterVariable,
-    IterBuiltinVariable,
     IteratorVariable,
+    IterBuiltinVariable,
     ItertoolsVariable,
     MapVariable,
     ObjectIteratorVariable,

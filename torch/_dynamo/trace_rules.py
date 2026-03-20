@@ -59,10 +59,10 @@ from .utils import (
 from .variables import (
     BuiltinVariable,
     DictBuiltinVariable,
-    IterBuiltinVariable,
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
     InspectSignatureVariable,
+    IterBuiltinVariable,
     LocalGeneratorFunctionVariable,
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,

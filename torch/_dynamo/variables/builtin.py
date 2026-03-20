@@ -30,7 +30,6 @@ import sys
 import types
 import typing
 import unittest
-from collections import defaultdict, OrderedDict
 from collections.abc import Callable, Iterable, KeysView, Sequence
 from typing import Any, cast, Literal, TYPE_CHECKING
 
@@ -66,7 +65,6 @@ from ..utils import (
     check_unspec_or_constant_args,
     check_unspec_python_args,
     cmp_name_to_op_mapping,
-    dict_methods,
     extract_fake_example_value,
     frozenset_methods,
     get_fake_value,
@@ -82,20 +80,13 @@ from ..utils import (
     tensortype_to_dtype,
 )
 from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
-from .constant import (
-    CONSTANT_VARIABLE_FALSE,
-    CONSTANT_VARIABLE_NONE,
-    ConstantVariable,
-    EnumVariable,
-)
+from .constant import CONSTANT_VARIABLE_FALSE, ConstantVariable, EnumVariable
 from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
-    DictBuiltinVariable,
     DictKeysVariable,
     DictViewVariable,
     FrozensetVariable,
-    is_hashable,
     OrderedSetClassVariable,
     SetVariable,
 )

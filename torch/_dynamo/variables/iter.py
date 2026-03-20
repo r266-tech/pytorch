@@ -19,8 +19,6 @@ from collections.abc import Callable, Sequence
 from typing import Any, TYPE_CHECKING
 
 from .. import graph_break_hints, polyfills, variables
-from ..guards import GuardBuilder, install_guard
-from ..source import Source
 from ..bytecode_transformation import (
     create_build_tuple,
     create_call_function,
@@ -34,6 +32,8 @@ from ..exc import (
     unimplemented,
     UserError,
 )
+from ..guards import GuardBuilder, install_guard
+from ..source import Source
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .dicts import DictViewVariable
@@ -661,18 +661,22 @@ class IterBuiltinVariable(VariableTracker):
 
         # Fast path: for known iterable VT types, call __iter__ directly
         # instead of going through the polyfill, saving tracing overhead.
-        if not rest and not kwargs and isinstance(
-            obj,
-            (
-                variables.ListVariable,
-                variables.RangeVariable,
-                IteratorVariable,
-                variables.ConstDictVariable,
-                variables.NNModuleVariable,
-                variables.TensorVariable,
-                variables.TupleVariable,
-                DictViewVariable,
-            ),
+        if (
+            not rest
+            and not kwargs
+            and isinstance(
+                obj,
+                (
+                    variables.ListVariable,
+                    variables.RangeVariable,
+                    IteratorVariable,
+                    variables.ConstDictVariable,
+                    variables.NNModuleVariable,
+                    variables.TensorVariable,
+                    variables.TupleVariable,
+                    DictViewVariable,
+                ),
+            )
         ):
             return obj.call_method(tx, "__iter__", [], {})
 
