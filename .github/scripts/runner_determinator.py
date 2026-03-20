@@ -464,7 +464,10 @@ def get_runner_prefix(
                 )
                 continue
 
-        if not experiment_settings.default and experiment_name not in eligible_experiments:
+        if (
+            not experiment_settings.default
+            and experiment_name not in eligible_experiments
+        ):
             log.info(
                 f"Skipping experiment '{experiment_name}', as it is not a default experiment and not in the eligible_experiments list"
             )
