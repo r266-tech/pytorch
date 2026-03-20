@@ -272,13 +272,16 @@ class PartialRender:
                 indent = line[: len(line) - len(line.lstrip())]
                 result_lines = result.strip("\n").split("\n")
                 non_empty = [rl for rl in result_lines if rl.strip()]
-                all_unindented = bool(non_empty) and all(
-                    not rl[0].isspace() for rl in non_empty
+                min_indent = (
+                    min(len(rl) - len(rl.lstrip()) for rl in non_empty)
+                    if non_empty
+                    else 0
                 )
-                if all_unindented:
-                    # Result is at uniform indent 0 (e.g.
-                    # ExternalTritonTemplateKernel hooks) — apply the
-                    # placeholder indent to every non-empty line.
+                if min_indent == 0:
+                    # Result uses relative indentation (min indent is 0).
+                    # Apply the placeholder indent to every non-empty
+                    # line, preserving internal structure (e.g. loop
+                    # bodies indented relative to the for statement).
                     indented = [
                         indent + rl if rl.strip() else rl for rl in result_lines
                     ]
@@ -1773,8 +1776,56 @@ class TritonTemplateKernel(TritonKernel):
             for i in range(num_store_subgraphs):
                 subgraph_name = self._get_store_output_subgraph_name(i)
                 with self.set_subgraph_body(subgraph_name):
-                    for node in self._epilogue_nodes_by_subgraph[i]:
-                        node.codegen(self.split_and_set_ranges(node.get_ranges()))
+                    red_info = getattr(self, '_epilogue_reduction_info', {}).get(i)
+                    if red_info is not None:
+                        # Reduction epilogue: use Inductor's standard
+                        # scheduling with DisableReduction/EnableReduction
+                        # markers for multi-node chains (mean, softmax, etc).
+                        _, pw_ranges, red_ranges, _, _, _ = red_info
+                        nodes = self._epilogue_nodes_by_subgraph[i]
+                        is_persistent = self._epilogue_persistent.get(i, True)
+                        old_persistent = self.persistent_reduction
+                        self.persistent_reduction = is_persistent
+                        self._epilogue_no_reduction_resize = is_persistent
+                        self.inside_reduction = True
+
+                        # Use Inductor's standard scheduling
+                        pw_numel = sympy_product(
+                            [V.graph.sizevars.simplify(s) for s in pw_ranges]
+                        )
+                        red_numel = sympy_product(
+                            [V.graph.sizevars.simplify(s) for s in red_ranges]
+                        )
+                        from torch._inductor.codegen.simd_kernel_features import (
+                            DisableReduction,
+                            EnableReduction,
+                        )
+                        node_schedule = scheduling.generate_node_schedule(
+                            nodes, pw_numel, red_numel
+                        )
+
+                        # Process schedule with DisableReduction/EnableReduction
+                        should_flush = not is_persistent
+                        for sched_item in node_schedule:
+                            if sched_item is DisableReduction:
+                                if should_flush:
+                                    self.codegen_body()
+                                self.inside_reduction = False
+                            elif sched_item is EnableReduction:
+                                if should_flush:
+                                    self.codegen_body()
+                                self.inside_reduction = True
+                            else:
+                                sched_item.codegen(
+                                    self.split_and_set_ranges(sched_item.get_ranges())
+                                )
+
+                        self.inside_reduction = False
+                        self.persistent_reduction = old_persistent
+                        self._epilogue_no_reduction_resize = False
+                    else:
+                        for node in self._epilogue_nodes_by_subgraph[i]:
+                            node.codegen(self.split_and_set_ranges(node.get_ranges()))
                     self.cse.invalidate(OrderedSet())
 
             self.codegen_prologues_in_subgraphs(
@@ -1912,6 +1963,29 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
         # Reference to the scheduler, set by _compute_fusion_metadata;
         # used in call_kernel() to codegen unfused epilogue nodes
         self._scheduling_ref: Any = None
+        # Flag to suppress reduction_resize ([:, None]) during epilogue codegen.
+        self._epilogue_no_reduction_resize = False
+        # Per-epilogue persistence flag: {store_idx: bool}
+        self._epilogue_persistent: dict[int, bool] = {}
+
+    def reduction_resize(self, value) -> str:
+        if self._epilogue_no_reduction_resize:
+            ndims = self.triton_tensor_ndim()
+            if ndims == 1:
+                return f"triton_helpers.promote_to_tensor({value})"
+            return str(value)
+        return super().reduction_resize(value)
+
+    def reduction_resize_and_shape(self, value, shape):
+        if self._epilogue_no_reduction_resize:
+            ndims = self.triton_tensor_ndim()
+            if ndims == 1:
+                return f"triton_helpers.promote_to_tensor({value})", shape
+            # Keep shape without adding [:, None] — drop reduction dims
+            nreduce = self.num_reduction_dims
+            new_shape = shape[: (ndims - nreduce)] if shape is not None else None
+            return str(value), new_shape
+        return super().reduction_resize_and_shape(value, shape)
 
     def get_unfused_epilogues(self) -> list[Any]:
         return self._unfused_epilogues
@@ -1924,27 +1998,63 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
         Determines eligible epilogues/prologues, builds epilogue specs,
         and computes prologue sources — all before render().
 
-        Hook setup (_setup_epilogue_hook / _setup_prologue_hook) cannot
-        happen here because it requires V.kernel context, which is only
-        active during codegen_template_body → render().
+        Uses single-pass transitive assignment: epilogue nodes arrive in
+        dependency order from the scheduler, so each node's inputs have
+        already been assigned to subgraphs. This replaces the old
+        find-eligible + BFS-closure approach with one forward pass.
         """
         self._scheduling_ref = scheduling
         from torch._inductor.dependencies import MemoryDep
 
         tb = self._template_buffer
-        self._eligible_epilogues = self._find_eligible_epilogues(
-            epilogue_nodes, tb.epilogue_fusable_outputs
-        )
-        self._epilogue_nodes_by_subgraph = defaultdict(
-            list,
-            {i: [sn] for i, (sn, _, _, _) in enumerate(self._eligible_epilogues)},
-        )
-        fused_ids = OrderedSet(id(sn) for sn, _, _, _ in self._eligible_epilogues)
+        output_param_mapping = tb.epilogue_fusable_outputs
+        output_bufs = list(output_param_mapping.keys())
+        output_params = list(output_param_mapping.values())
+
+        # --- Phase 1: Single-pass transitive subgraph assignment ---
+        # Seed buf_to_subgraph with template output buffers.
+        # As we process each epilogue node, we look up which subgraph its
+        # read-deps belong to, assign the node there, and register the
+        # node's write-buffers so downstream nodes can find the same
+        # subgraph transitively.
+        buf_to_subgraph: dict[str, int] = {
+            buf: i for i, buf in enumerate(output_bufs)
+        }
+        subgraph_nodes: dict[int, list] = defaultdict(list)
+        subgraph_store_target: dict[int, str] = {}
+        assigned_ids: set[int] = set()
+
+        for node in epilogue_nodes:
+            if isinstance(getattr(node, "node", None), ir.MultiOutput):
+                continue
+
+            # Find which subgraph this node connects to via its reads
+            subgraph_idx = None
+            for dep in node.read_writes.reads:
+                if isinstance(dep, MemoryDep) and dep.name in buf_to_subgraph:
+                    subgraph_idx = buf_to_subgraph[dep.name]
+                    break
+
+            if subgraph_idx is None:
+                continue
+
+            subgraph_nodes[subgraph_idx].append(node)
+            assigned_ids.add(id(node))
+
+            # Register writes for downstream transitivity
+            for dep in node.read_writes.writes:
+                if isinstance(dep, MemoryDep):
+                    buf_to_subgraph[dep.name] = subgraph_idx
+                    subgraph_store_target[subgraph_idx] = dep.name
+
+        # Unassigned nodes become unfused epilogues
         self._unfused_epilogues = [
             n
             for n in epilogue_nodes
-            if id(n) not in fused_ids and not isinstance(n.node, ir.MultiOutput)
+            if id(n) not in assigned_ids
+            and not isinstance(getattr(n, "node", None), ir.MultiOutput)
         ]
+
         self._prologue_sources = {
             buf_name: frozenset(
                 d.name for d in pro_node.read_writes.reads if isinstance(d, MemoryDep)
@@ -1952,6 +2062,106 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
             for buf_name, pro_nodes in buf_name_to_prologue_group.items()
             for pro_node in pro_nodes
         }
+
+        # --- Phase 2: Build _eligible_epilogues and validate reductions ---
+        # For each subgraph, determine the store target and check if it
+        # contains a fusable reduction.
+        self._eligible_epilogues = []
+        self._epilogue_nodes_by_subgraph = defaultdict(list)
+        self._epilogue_reduction_info: dict[
+            int, tuple[str, list, list, object, str | None, int]
+        ] = {}
+
+        for subgraph_idx in sorted(subgraph_nodes.keys()):
+            nodes = subgraph_nodes[subgraph_idx]
+            output_buf = output_bufs[subgraph_idx]
+            output_param = output_params[subgraph_idx]
+
+            # Store target = last node's write (or None if same as template output)
+            st = subgraph_store_target.get(subgraph_idx)
+            store_target = st if st and st != output_buf else None
+
+            # Check for reduction nodes and validate fusability
+            reduction_info = None
+            unfusable = False
+            for snode in nodes:
+                if not (hasattr(snode, "is_reduction") and snode.is_reduction()):
+                    continue
+                # Extract inner IR node (handles both SchedulerNode and FusedSchedulerNode)
+                inner_node = getattr(snode, "node", None)
+                if inner_node is None:
+                    snodes_inner = getattr(snode, "snodes", None)
+                    if snodes_inner:
+                        for sn in snodes_inner:
+                            if hasattr(sn, "is_reduction") and sn.is_reduction():
+                                inner_node = getattr(sn, "node", None)
+                                break
+                if inner_node is None:
+                    unfusable = True
+                    break
+
+                # Only fuse actual Reduction nodes (not Sort which mimics reduction)
+                inner_data = inner_node.data
+                if not isinstance(inner_data, ir.Reduction):
+                    unfusable = True
+                    break
+
+                # Check extra loads: the primary reduction's inner_fn must
+                # only read the template output (or chain-internal buffers).
+                read_bufs = inner_data.inner_fn_opcount().read_buffers
+                has_extra_loads = any(
+                    b != output_buf and b not in buf_to_subgraph
+                    for b in read_bufs
+                )
+                if has_extra_loads:
+                    unfusable = True
+                    break
+
+                red_type = inner_node.get_reduction_type()
+                pw_ranges, red_ranges = snode.get_ranges()
+                # Determine the reduction block_id from original_reduced_dims
+                reduced_dims = getattr(inner_node.data, 'original_reduced_dims', None)
+                if reduced_dims and len(reduced_dims) == 1:
+                    red_block_id = reduced_dims[0]
+                else:
+                    # Fallback: assume last dim is the reduction dim
+                    red_block_id = len(self.output_node.get_size()) - 1
+                reduction_info = (
+                    red_type,
+                    list(pw_ranges),
+                    list(red_ranges),
+                    None,
+                    None,
+                    red_block_id,
+                )
+                break  # Only need info from the first reduction
+
+            if unfusable:
+                # Move entire subgraph to unfused
+                self._unfused_epilogues.extend(nodes)
+                continue
+
+            epilogue_idx = len(self._eligible_epilogues)
+            primary_snode = nodes[0]
+            self._eligible_epilogues.append(
+                (primary_snode, output_buf, output_param, store_target)
+            )
+            self._epilogue_nodes_by_subgraph[epilogue_idx] = nodes
+
+            if reduction_info is not None:
+                self._epilogue_reduction_info[epilogue_idx] = reduction_info
+
+        # --- Phase 3: Register extra inputs and build epilogue interface ---
+        # Register extra inputs for reads that are neither template outputs
+        # nor chain-internal buffers (both tracked in buf_to_subgraph).
+        for nodes in self._epilogue_nodes_by_subgraph.values():
+            for node in nodes:
+                for dep in node.read_writes.reads:
+                    if isinstance(dep, MemoryDep) and dep.name not in buf_to_subgraph:
+                        if dep.name not in self._extra_inputs:
+                            param = f"_extra_input_{len(self._extra_inputs)}"
+                            self._extra_inputs[dep.name] = param
+                            self.args.input_buffers[dep.name] = param
 
         # Build simplified epilogue interface: _epilogue_idx_by_param,
         # _epilogue_keep_store, and _extra_store_targets.
@@ -2042,48 +2252,61 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
         # Register no-op <DEF_KERNEL> hook (standard path requires it).
         self.render_hooks["<DEF_KERNEL>"] = lambda: ""
 
-    def _find_eligible_epilogues(self, epilogue_nodes, output_param_mapping):
-        """Compute fusion eligibility and register extra inputs.
+    def _make_reduction_subgraph(self, subgraph_name, pw_numel, red_numel, persistent):
+        """Create a subgraph with reduction range trees.
 
-        Returns list of eligible epilogue tuples:
-            [(snode, output_buf, output_param, store_target), ...]
+        Used for reduction epilogues where we need Inductor's standard
+        reduction codegen (ops.reduction → TritonKernel.reduction) to
+        generate the reduction code.
+
+        Args:
+            subgraph_name: name for the subgraph
+            pw_numel: pointwise (non-reduction) numel
+            red_numel: reduction numel
+            persistent: if True, is_loop=False (inline reduction);
+                        if False, is_loop=True (loop reduction)
         """
-        from torch._inductor.dependencies import MemoryDep
+        groups = {
+            "x": V.graph.sizevars.simplify(pw_numel),
+            "r0_": V.graph.sizevars.simplify(red_numel),
+        }
+        old_persistent = self.persistent_reduction
+        self.persistent_reduction = persistent
+        range_trees = self.construct_range_trees(
+            pid_cache=None,
+            inside_reduction=True,
+            is_reduction=True,
+            numels=groups,
+            no_x_dim=False,
+        )
+        self.persistent_reduction = old_persistent
+        self.subgraph_bodies[subgraph_name] = SubgraphInfo(
+            body=IndentedBuffer(),
+            cse=self.cse.clone(),
+            range_trees=range_trees,
+            range_tree_nodes={},
+            numels=groups,
+        )
 
-        # Filter eligible epilogues
-        epilogues = []
-        for epilogue_node in epilogue_nodes:
-            if isinstance(epilogue_node.node, ir.MultiOutput):
-                continue
-            dep_names = OrderedSet(
-                d.name
-                for d in epilogue_node.read_writes.reads
-                if isinstance(d, MemoryDep) and d.name in output_param_mapping
-            )
-            if len(dep_names) != 1:
-                continue
-            output_buf = next(iter(dep_names))
-            epilogue_writes = epilogue_node.read_writes.writes
-            raw_st = next(iter(epilogue_writes)).name if epilogue_writes else None
-            epilogues.append(
-                (
-                    epilogue_node,
-                    output_buf,
-                    output_param_mapping[output_buf],
-                    raw_st if raw_st != output_buf else None,
-                )
-            )
+    def _is_reduction_persistent(self, red_ranges, red_block_id):
+        """Check if reduction can be persistent (tile covers full dim).
 
-        # Register extra inputs needed by fused epilogues
-        for snode, _, _, _ in epilogues:
-            for dep in snode.read_writes.reads:
-                if isinstance(dep, MemoryDep) and dep.name not in output_param_mapping:
-                    if dep.name not in self._extra_inputs:
-                        param = f"_extra_input_{len(self._extra_inputs)}"
-                        self._extra_inputs[dep.name] = param
-                        self.args.input_buffers[dep.name] = param
+        Persistent = block_size >= reduction_dim_size, so the entire
+        reduction fits in one tile without looping.
+        """
+        tb = self._template_buffer
+        bound = tb._bound_kernel
+        cfg = bound._config
+        if cfg is None:
+            return False
 
-        return epilogues
+        red_size = int(red_ranges[0])
+
+        if red_block_id < len(cfg.block_sizes):
+            bs = cfg.block_sizes[red_block_id]
+            return isinstance(bs, int) and bs >= red_size
+        # Fewer block_sizes than dims → full slice → persistent
+        return True
 
     def _setup_epilogue_hook(self, output_buf=None, output_param=None):
         store_idx = next(self.store_output_ctr)
@@ -2093,49 +2316,132 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
             self.render_hooks[subgraph_name] = lambda: ""
             return
 
-        n_dims = len(self._template_buffer.get_size())
-        indices = [f"x_epilogue{store_idx}_{d}" for d in range(n_dims)]
-        val = f"_kernel_val_{store_idx}"
-        mask = f"_tile_mask_{store_idx}"
+        red_info = getattr(self, '_epilogue_reduction_info', {}).get(store_idx)
 
-        buf = output_buf
-        node = V.graph.get_buffer(buf) if buf else None
-        output_size = (
-            list(node.get_size())
-            if node is not None
-            else list(self.output_node.get_size())
-        )
-        self._make_independent_subgraph(subgraph_name, sympy_product(output_size))
-        with self.set_subgraph_body(subgraph_name):
-            indices = list(map(OpOverrides.paren, indices))
-            index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
-            lengths = [V.graph.sizevars.simplify(s) for s in output_size]
-            assert len(indices) == len(lengths)
-            self.template_out = val
-            self._setup_contiguous_index_state(
-                indices,
-                index_symbols,
-                lengths,
-                mask,
-                xindex_name=f"x_epilogue{store_idx}_index",
+        if red_info is not None:
+            # Reduction epilogue v2: use Inductor's standard reduction codegen.
+            # Create a subgraph with reduction range trees so ops.reduction()
+            # flows through TritonKernel.reduction().
+            _, pw_ranges, red_ranges, _, _, red_block_id = red_info
+            n_pw = len(pw_ranges)
+            pw_numel = sympy_product(
+                [V.graph.sizevars.simplify(s) for s in pw_ranges]
             )
-            self.template_out_shape = val
+            red_numel = sympy_product(
+                [V.graph.sizevars.simplify(s) for s in red_ranges]
+            )
+            is_persistent = self._is_reduction_persistent(red_ranges, red_block_id)
+            self._epilogue_persistent[store_idx] = is_persistent
+            self._make_reduction_subgraph(
+                subgraph_name, pw_numel, red_numel, persistent=is_persistent
+            )
+            val = f"_kernel_val_{store_idx}"
+            mask = f"_tile_mask_{store_idx}"
+            buf = output_buf
+            with self.set_subgraph_body(subgraph_name):
+                # Set up contiguous index state for the x (pointwise) dimension
+                # using the template's index variables. This enables the store
+                # part of the epilogue to generate correct indexing.
+                indices = [f"x_epilogue{store_idx}_{d}" for d in range(n_pw)]
+                indices = list(map(OpOverrides.paren, indices))
+                index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
+                pw_lengths = [V.graph.sizevars.simplify(s) for s in pw_ranges]
+                # Set up entries on the x (first) range tree for store indexing
+                if indices and pw_lengths:
+                    self.template_out = val
+                    self._setup_contiguous_index_state(
+                        indices,
+                        index_symbols,
+                        pw_lengths,
+                        mask,
+                        xindex_name=f"x_epilogue{store_idx}_index",
+                    )
 
-            # Set up CSE state for epilogue codegen
-            block_shape = tuple(
-                f"{rt.prefix.upper()}BLOCK"
-                for rt in self.range_trees
-                if not rt.is_reduction
-            )
-            if not block_shape:
-                block_shape = ("XBLOCK",)
-            self.cse.store_cache[buf] = self.cse.namedvar(
-                val, dtype=torch.float32, shape=block_shape
-            )
-            assert output_param is not None
-            self.args.output_buffers[buf] = output_param
+                assert output_param is not None
+                self.args.output_buffers[buf] = output_param
 
-        self.render_hooks[subgraph_name] = self._make_codegen_hook(subgraph_name)
+                if is_persistent:
+                    # Persistent: seed CSE with the template's UNREDUCED value
+                    # so ops.load(output_buf) resolves to it without a real
+                    # tl.load. Shape includes both pointwise and reduction dims.
+                    block_shape = tuple(
+                        f"{rt.prefix.upper()}BLOCK"
+                        for rt in self.range_trees
+                    )
+                    if not block_shape:
+                        block_shape = ("XBLOCK",)
+                    template_val_var = self.cse.namedvar(
+                        val, dtype=torch.float32, shape=block_shape
+                    )
+                    self.cse.store_cache[buf] = template_val_var
+                # Non-persistent: do NOT seed CSE. ops.load(output_buf) will
+                # generate a real tl.load from the template's stored output
+                # (hot in L1/L2 cache after the template's tl.store).
+
+            # Custom hook that sets inside_reduction and persistent_reduction
+            # during codegen_body() assembly.
+            def _make_reduction_hook(sg_name, persistent):
+                def hook():
+                    with self.set_subgraph_body(sg_name):
+                        old_inside = self.inside_reduction
+                        old_persistent = self.persistent_reduction
+                        self.inside_reduction = True
+                        self.persistent_reduction = persistent
+                        self.codegen_body()
+                        self.cse.invalidate(OrderedSet())
+                        result = self.body.getvalue()
+                        self.inside_reduction = old_inside
+                        self.persistent_reduction = old_persistent
+                        return result.strip()
+                return hook
+
+            self.render_hooks[subgraph_name] = _make_reduction_hook(
+                subgraph_name, persistent=is_persistent
+            )
+        else:
+            n_dims = len(self._template_buffer.get_size())
+            indices = [f"x_epilogue{store_idx}_{d}" for d in range(n_dims)]
+            val = f"_kernel_val_{store_idx}"
+            mask = f"_tile_mask_{store_idx}"
+            node = V.graph.get_buffer(output_buf) if output_buf else None
+            output_size = (
+                list(node.get_size())
+                if node is not None
+                else list(self.output_node.get_size())
+            )
+            buf = output_buf
+            self._make_independent_subgraph(subgraph_name, sympy_product(output_size))
+            with self.set_subgraph_body(subgraph_name):
+                indices = list(map(OpOverrides.paren, indices))
+                index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
+                lengths = [V.graph.sizevars.simplify(s) for s in output_size]
+                assert len(indices) == len(lengths)
+                self.template_out = val
+                self._setup_contiguous_index_state(
+                    indices,
+                    index_symbols,
+                    lengths,
+                    mask,
+                    xindex_name=f"x_epilogue{store_idx}_index",
+                )
+                self.template_out_shape = val
+
+                # Set up CSE state for epilogue codegen
+                block_shape = tuple(
+                    f"{rt.prefix.upper()}BLOCK"
+                    for rt in self.range_trees
+                    if not rt.is_reduction
+                )
+                if not block_shape:
+                    block_shape = ("XBLOCK",)
+                val_var = self.cse.namedvar(
+                    val, dtype=torch.float32, shape=block_shape
+                )
+                self.cse.store_cache[buf] = val_var
+                assert output_param is not None
+                self.args.output_buffers[buf] = output_param
+
+            self.render_hooks[subgraph_name] = self._make_codegen_hook(subgraph_name)
 
     def _setup_prologue_hook(self, input_name, prologue_sources=None):
         ir_node = self._template_buffer._named_inputs.get(input_name)

@@ -5870,18 +5870,41 @@ class Scheduler:
         if node1.is_template():
             if (
                 node2.has_aliasing_or_mutation()
-                or node2.is_reduction()
                 or not config.epilogue_fusion
             ):
                 why("template epilogue not satisfied")
                 return False
+            if node2.is_reduction():
+                template_buf = node1.get_template_node()
+                supports_red = getattr(template_buf, "supports_reduction_epilogue", False)
+                if callable(supports_red):
+                    if not supports_red(node2):
+                        why("template does not support this reduction epilogue")
+                        return False
+                elif not supports_red:
+                    why("template does not support reduction epilogue")
+                    return False
             template_buf = node1.get_template_node()
             assert template_buf is not None
-            if template_buf.is_multi_outputs_template() and not isinstance(
-                node2.node, ir.ComputedBuffer
-            ):
-                why("multi-output template epilogue requires ComputedBuffer")
-                return False
+            if template_buf.is_multi_outputs_template():
+                # Check that all leaf nodes in node2 are ComputedBuffers.
+                # FusedSchedulerNodes (e.g., reduction+pointwise for mean)
+                # are allowed if all their sub-nodes are ComputedBuffers.
+                node2_ir_node = getattr(node2, 'node', None)
+                if node2_ir_node is not None:
+                    if not isinstance(node2_ir_node, ir.ComputedBuffer):
+                        why("multi-output template epilogue requires ComputedBuffer")
+                        return False
+                elif hasattr(node2, 'snodes'):
+                    if not all(
+                        isinstance(getattr(sn, 'node', None), ir.ComputedBuffer)
+                        for sn in node2.snodes
+                    ):
+                        why("multi-output template epilogue requires ComputedBuffer")
+                        return False
+                else:
+                    why("multi-output template epilogue requires ComputedBuffer")
+                    return False
 
         if (node1.get_buffer_names() & V.graph.no_fuse_buffer_names) or (
             node2.get_buffer_names() & V.graph.no_fuse_buffer_names
@@ -5999,8 +6022,28 @@ class Scheduler:
             # Examples here include:
             #   - MemoryDep("foo", x) != MemoryDep("foo", x + 1)
             #   - MemoryDep("foo", x) != StarDep("foo")
-            why("memory deps did not match")
-            return False
+            #
+            # Exception: template + reduction epilogue fusion.
+            # When a template supports reduction epilogue, the reduction reads the
+            # template output with potentially different loop ordering (e.g. sum(dim=0)
+            # transposes the index). This is safe because the template produces the
+            # reduced value inline — the buffer read never actually occurs in the
+            # fused kernel.
+            if (
+                node1.is_template()
+                and node2.is_reduction()
+            ):
+                template_buf = node1.get_template_node()
+                supports_red = getattr(template_buf, "supports_reduction_epilogue", False)
+                if callable(supports_red):
+                    if supports_red(node2):
+                        # Clear the remaining deps that overlap with template outputs
+                        remaining_deps = remaining_deps - node1_buf_names
+                elif supports_red:
+                    remaining_deps = remaining_deps - node1_buf_names
+            if remaining_deps & node1_buf_names:
+                why("memory deps did not match")
+                return False
 
         node1_op_names = node1.get_operation_names()
         for name in remaining_deps:

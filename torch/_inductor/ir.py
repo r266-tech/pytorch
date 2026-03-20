@@ -1258,6 +1258,7 @@ class Reduction(Loops):
     # self.dtype represents the dst dtype
     src_dtype: torch.dtype
     reduction_hint: ReductionHint
+    original_reduced_dims: tuple[int, ...] | None = None
 
     def __str__(self) -> str:
         return self._to_str(("ranges", "reduction_ranges", "reduction_type"))
@@ -1551,6 +1552,7 @@ class Reduction(Loops):
         reduction_type: ReductionType,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         input_node: IRNode | None = None,
+        original_reduced_dims: tuple[int, ...] | None = None,
     ) -> TensorBox:
         """
         Create a reduction node. May split the reduction to multiple layers to expose
@@ -1744,6 +1746,7 @@ class Reduction(Loops):
                 reduction_type=reduction_type,
                 src_dtype=src_dtype,
                 reduction_hint=reduction_hint,
+                original_reduced_dims=original_reduced_dims,
             )
         )
         return out
@@ -1960,6 +1963,8 @@ class Reduction(Loops):
         )
 
         assert original_ranges == new_ranges[: len(original_ranges)]
+        # Note: original_reduced_dims not propagated to multilayer splits
+        # since they are internal implementation detail reductions
         return TensorBox.create(
             Reduction(
                 device=device,

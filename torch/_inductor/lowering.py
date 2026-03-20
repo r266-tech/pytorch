@@ -6431,6 +6431,7 @@ def _make_reduction_inner(
         inner_fn=loader,
         ranges=new_size,
         reduction_ranges=reduced_sizes,
+        original_reduced_dims=tuple(sorted(reduced_idx)),
     )
 
 
@@ -6555,6 +6556,7 @@ def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
     loader = kwargs.pop("inner_fn")
     kwargs.pop("dst_dtype")
     kwargs.pop("src_dtype")
+    kwargs.pop("original_reduced_dims", None)
 
     mean, m2, _ = ir.WelfordReduction.create(
         inner_fns=(loader,),
@@ -8047,6 +8049,7 @@ def prepare_softmax_online(x, dim):
         x, axis=dim, keepdims=True, dtype=None, override_return_dtype=None
     )
 
+    kwargs.pop("original_reduced_dims", None)
     reduction_ranges = kwargs["reduction_ranges"]
     rnumel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
     hint, num_split = ir.Reduction.num_splits(
