@@ -2071,6 +2071,9 @@ class BuiltinVariable(VariableTracker):
             return VariableTracker.build(tx, dir(arg.value))
         if isinstance(arg, BuiltinVariable):
             return VariableTracker.build(tx, dir(arg.fn))
+        # Enable specialized VTs for constants to work with dir()
+        if arg.is_python_constant():
+            return VariableTracker.build(tx, dir(arg.as_python_constant()))
         return None
 
     def call_set(
