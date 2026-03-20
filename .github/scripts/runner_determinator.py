@@ -1,9 +1,5 @@
 # flake8: noqa: G004
 
-# Note: Copies of this script in runner_determinator.py and _runner-determinator.yml
-#       must be kept in sync. You can do it easily by running the following command:
-#           python .github/scripts/update_runner_determinator.py
-
 """
 This runner determinator is used to determine which set of runners to run a
 GitHub job on. It uses the first comment of a GitHub issue (by default
@@ -362,11 +358,8 @@ def parse_settings_from_text(settings_text: str) -> Settings:
     """
     try:
         if settings_text:
-            # Escape the backtick as well so that we can have the settings in a code block on the GH issue
-            # for easy reading
-            # Note: Using ascii for the backtick so that the cat step in _runner-determinator.yml doesn't choke on
-            #       the backtick character in shell commands.
-            backtick = chr(96)  # backtick character
+            # Strip backticks so settings can be in a code block on the GH issue
+            backtick = chr(96)
             settings_text = settings_text.strip(f"\r\n\t{backtick} ")
             settings = load_yaml(settings_text)
 
@@ -471,16 +464,9 @@ def get_runner_prefix(
                 )
                 continue
 
-        if eligible_experiments:
-            if experiment_name not in eligible_experiments:
-                exp_list = ", ".join(eligible_experiments)
-                log.info(
-                    f"Skipping experiment '{experiment_name}', as it is not in the eligible_experiments list: {exp_list}"
-                )
-                continue
-        elif not experiment_settings.default:
+        if not experiment_settings.default and experiment_name not in eligible_experiments:
             log.info(
-                f"Skipping experiment '{experiment_name}', as it is not a default experiment"
+                f"Skipping experiment '{experiment_name}', as it is not a default experiment and not in the eligible_experiments list"
             )
             continue
 

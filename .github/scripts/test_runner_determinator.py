@@ -294,11 +294,12 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         @User2,lf,otherExp
 
         """
+        # eligible_experiments is additive: defaults (lf) + specified (otherExp)
         result = rd.get_runner_prefix(
             settings_text, ["User2"], USER_BRANCH, frozenset(["otherExp"])
         )
         self.assertEqual(
-            "otherExp.", result.prefix, "Runner prefix not correct for User2"
+            "lf.otherExp.", result.prefix, "Runner prefix not correct for User2"
         )
 
     @patch("random.uniform", return_value=50)
@@ -383,12 +384,13 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
 
         """
 
-        # User3 is opted out, but is pulled into default experiments by the 10% rollout
+        # eligible_experiments is additive: defaults (lf) + specified (otherExp)
+        # User3 is pulled into both by the 10% rollout
         result = rd.get_runner_prefix(
             settings_text, ["User3"], USER_BRANCH, frozenset(["otherExp"])
         )
         self.assertEqual(
-            "otherExp.", result.prefix, "Runner prefix not correct for user"
+            "lf.otherExp.", result.prefix, "Runner prefix not correct for user"
         )
 
     @patch("random.uniform", return_value=25)
@@ -618,6 +620,69 @@ class TestRunnerDeterminatorArcExperiment(TestCase):
         result = rd.get_runner_prefix(settings_text, ["User1"], EXCEPTION_BRANCH)
         self.assertEqual("mt-", result.prefix)
         self.assertTrue(result.use_arc)
+
+    def test_arc_nondefault_eligible_enables_arc_and_default_lf(self) -> None:
+        """eligible_experiments={"arc"} with arc default:false enables arc
+        AND still enables the default lf experiment."""
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 0
+            arc:
+                rollout_perc: 0
+                default: false
+        ---
+
+        Users:
+        @User1,lf,arc
+
+        """
+        result = rd.get_runner_prefix(
+            settings_text, ["User1"], USER_BRANCH, frozenset(["arc"])
+        )
+        self.assertEqual("mt-", result.prefix)
+        self.assertTrue(result.use_arc)
+
+    def test_arc_nondefault_eligible_without_user_optin_no_arc(self) -> None:
+        """eligible_experiments={"arc"} with arc default:false and user NOT
+        opted into arc does NOT enable arc (still requires user opt-in or rollout)."""
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 0
+            arc:
+                rollout_perc: 0
+                default: false
+        ---
+
+        Users:
+        @User1,lf
+
+        """
+        result = rd.get_runner_prefix(
+            settings_text, ["User1"], USER_BRANCH, frozenset(["arc"])
+        )
+        self.assertEqual("lf.", result.prefix)
+        self.assertFalse(result.use_arc)
+
+    def test_arc_nondefault_no_eligible_skips_arc(self) -> None:
+        """Empty eligible_experiments still skips non-default arc experiment."""
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 0
+            arc:
+                rollout_perc: 0
+                default: false
+        ---
+
+        Users:
+        @User1,lf,arc
+
+        """
+        result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
+        self.assertEqual("lf.", result.prefix)
+        self.assertFalse(result.use_arc)
 
     def test_arc_takes_precedence_over_lf(self) -> None:
         settings_text = """
