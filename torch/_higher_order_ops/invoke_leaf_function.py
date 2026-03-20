@@ -698,6 +698,55 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
                 requires_grad_indices=requires_grad_indices,
             )
 
+        # Register backward hooks if the leaf function has a hook registered.
+        # The hook info is stored as attributes on the _LeafCallable.
+        # We extract it and register tensor.register_hook() on the outer
+        # (pre-detach) flat_args so the hook fires when the tensor's gradient
+        # is computed in the outer autograd graph.
+        hook_real = getattr(real_fn_callable, "_leaf_hook_real_fn", None)
+        hook_fake = getattr(real_fn_callable, "_leaf_hook_fake_fn", None)
+        if hook_real is not None:
+            assert hook_fake is not None  # noqa: S101
+            hook_captured_out_spec: list[pytree.TreeSpec | None] = [None]
+            wrapped_hook_real, wrapped_hook_fake = make_leaf_function_wrappers(
+                hook_real, hook_fake, hook_captured_out_spec
+            )
+            hook_real_callable = _LeafCallable(wrapped_hook_real)
+            hook_fake_callable = _LeafCallable(wrapped_hook_fake)
+
+            for i, arg in enumerate(flat_args):
+                if isinstance(arg, torch.Tensor) and arg.requires_grad:
+
+                    def _make_hook(
+                        tensor_idx: int,
+                        all_args: tuple[Any, ...],
+                        h_real: Any,
+                        h_fake: Any,
+                        in_spec: Any,
+                    ) -> Callable:
+                        def hook(grad: torch.Tensor) -> None:
+                            new_flat_args = list(all_args)
+                            new_flat_args[tensor_idx] = grad
+                            invoke_leaf_function(
+                                h_real,
+                                h_fake,
+                                in_spec,
+                                "",
+                                *new_flat_args,
+                            )
+
+                        return hook
+
+                    arg.register_hook(
+                        _make_hook(
+                            i,
+                            flat_args,
+                            hook_real_callable,
+                            hook_fake_callable,
+                            input_spec,
+                        )
+                    )
+
         ctx.real_backward = real_backward
         ctx.fake_backward = fake_backward
 
