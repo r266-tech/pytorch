@@ -66,6 +66,7 @@ from ..utils import (
     check_unspec_or_constant_args,
     check_unspec_python_args,
     cmp_name_to_op_mapping,
+    dict_methods,
     extract_fake_example_value,
     frozenset_methods,
     get_fake_value,
@@ -3233,7 +3234,7 @@ class DictBuiltinVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: list[VariableTracker],
+        args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         return DictBuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
@@ -3401,7 +3402,7 @@ class IterBuiltinVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: list[VariableTracker],
+        args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if not args:
@@ -3442,7 +3443,7 @@ class IterBuiltinVariable(VariableTracker):
         if rest:
             # iter(obj, sentinel) returns a callable iterator; wrap it so
             # Dynamo knows to forward __next__ calls to the returned object.
-            ret = ObjectIteratorVariable(ret)
+            ret = variables.ObjectIteratorVariable(ret)
         return ret
 
 

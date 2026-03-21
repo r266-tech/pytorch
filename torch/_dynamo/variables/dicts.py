@@ -750,11 +750,11 @@ class ConstDictVariable(VariableTracker):
                         # NB - Guard on all the keys of the other dict to ensure
                         # correctness.
                         args[0].install_dict_keys_match_guard()
-                        dict_vt: ConstDictVariable = args[0]
+                        dict_vt = args[0]
                     else:
                         dict_vt = DictBuiltinVariable.call_custom_dict(
                             tx, dict, args[0]
-                        )  # type: ignore[assignment]
+                        )
                     self.items.update(dict_vt.items)  # type: ignore[attr-defined]
                 if has_kwargs:
                     # Handle kwargs
