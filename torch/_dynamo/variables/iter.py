@@ -32,11 +32,8 @@ from ..exc import (
     unimplemented,
     UserError,
 )
-from ..guards import GuardBuilder, install_guard
-from ..source import Source
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
-from .dicts import DictViewVariable
 
 
 if TYPE_CHECKING:
@@ -620,73 +617,3 @@ class FilterVariable(IteratorVariable):
         codegen(self.fn)
         self.reconstruct_items(codegen)
         codegen.extend_output(create_call_function(2, False))
-
-
-class IterBuiltinVariable(VariableTracker):
-    """Variable tracker for the `iter` builtin."""
-
-    @classmethod
-    def create_with_source(cls, value: Any, source: Source) -> "IterBuiltinVariable":
-        install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
-        return cls(source=source)
-
-    def __init__(self, value: Any = iter, **kwargs: Any) -> None:
-        assert value is iter
-        super().__init__(**kwargs)
-
-    def __repr__(self) -> str:
-        return "IterBuiltinVariable()"
-
-    def as_python_constant(self) -> Any:
-        return iter
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        assert "iter" not in codegen.tx.f_globals, "shadowed global"
-        codegen.append_output(codegen.create_load_global("iter", add=True))
-
-    def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if not args:
-            unimplemented(
-                gb_type="iter() with no arguments",
-                context="iter()",
-                explanation="iter() requires at least one argument",
-                hints=[],
-            )
-        obj, *rest = args
-
-        # Fast path: for known iterable VT types, call __iter__ directly
-        # instead of going through the polyfill, saving tracing overhead.
-        if (
-            not rest
-            and not kwargs
-            and isinstance(
-                obj,
-                (
-                    variables.ListVariable,
-                    variables.RangeVariable,
-                    IteratorVariable,
-                    variables.ConstDictVariable,
-                    variables.NNModuleVariable,
-                    variables.TensorVariable,
-                    variables.TupleVariable,
-                    DictViewVariable,
-                ),
-            )
-        ):
-            return obj.call_method(tx, "__iter__", [], {})
-
-        # General case: inline the polyfill which handles __iter__ and __getitem__
-        ret = variables.UserFunctionVariable(
-            polyfills.builtins.iter_  # type: ignore[arg-type]
-        ).call_function(tx, [obj, *rest], {})
-
-        if rest:
-            # iter(obj, sentinel) returns a callable iterator; wrap it so
-            # Dynamo knows to forward __next__ calls to the returned object.
-            ret = ObjectIteratorVariable(ret)
-        return ret
