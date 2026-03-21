@@ -28,7 +28,11 @@ def build_libtorch(rerun_cmake: bool, cmake_only: bool) -> None:
         args = [cmake]
         if shutil.which("ninja"):
             args += ["-GNinja"]
-        args += ["-DBUILD_PYTHON=OFF", str(REPO_ROOT)]
+        args += [
+            "-DBUILD_PYTHON=OFF",
+            f"-DPython_EXECUTABLE={sys.executable}",
+            str(REPO_ROOT),
+        ]
         print(" ".join(args), file=sys.stderr, flush=True)
         subprocess.check_call(args, cwd=build_dir)
 
