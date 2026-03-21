@@ -3423,7 +3423,7 @@ class IterBuiltinVariable(VariableTracker):
                 (
                     variables.ListVariable,
                     variables.RangeVariable,
-                    IteratorVariable,
+                    variables.IteratorVariable,
                     variables.ConstDictVariable,
                     variables.NNModuleVariable,
                     variables.TensorVariable,

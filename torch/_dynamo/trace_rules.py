@@ -3972,10 +3972,8 @@ def is_torch(filename: str) -> bool:
 Main entry point for looking up the trace rule (the Dynamo variable) for a given callable object.
 """
 
-BUILTIN_CALLABLES = {
-    dict: DictBuiltinVariable,
-    iter: IterBuiltinVariable
-}
+BUILTIN_CALLABLES = {dict: DictBuiltinVariable, iter: IterBuiltinVariable}
+
 
 def lookup_callable(obj: Callable[..., Any]) -> type[VariableTracker] | None:
     if not hashable(obj):
