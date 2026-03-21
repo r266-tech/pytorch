@@ -11,6 +11,7 @@ import platform
 import re
 import subprocess
 import sys
+import sysconfig
 import zipfile
 from pathlib import Path
 
@@ -66,7 +67,10 @@ def check_wheel_platform_tag() -> None:
     if target_os == "linux" and platform.machine() == "aarch64":
         target_os = "linux-aarch64"
     expected_python = f"cp{sys.version_info.major}{sys.version_info.minor}"
+    # sys.abiflags is Unix-only; on Windows, detect free-threaded builds via sysconfig.
     abiflags = getattr(sys, "abiflags", "")
+    if not abiflags and sysconfig.get_config_var("Py_GIL_DISABLED"):
+        abiflags = "t"
     expected_abi = f"cp{sys.version_info.major}{sys.version_info.minor}{abiflags}"
 
     platform_pattern = EXPECTED_PLATFORM_TAGS.get(target_os)
