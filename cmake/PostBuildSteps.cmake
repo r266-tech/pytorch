@@ -217,6 +217,14 @@ if(APPLE AND BUILD_PYTHON AND OPENMP_FOUND)
     get_filename_component(_omp_name "${OpenMP_libomp_LIBRARY}" NAME)
     install(FILES "${OpenMP_libomp_LIBRARY}"
             DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+    # Install omp.h so Inductor's C++ backend can find it at runtime.
+    # The header lives at <prefix>/include/omp.h next to <prefix>/lib/libomp.dylib.
+    get_filename_component(_omp_lib_dir "${OpenMP_libomp_LIBRARY}" DIRECTORY)
+    get_filename_component(_omp_prefix "${_omp_lib_dir}" DIRECTORY)
+    if(EXISTS "${_omp_prefix}/include/omp.h")
+      install(FILES "${_omp_prefix}/include/omp.h"
+              DESTINATION "${TORCH_INSTALL_INCLUDE_DIR}")
+    endif()
     # Fix libtorch_cpu's rpath so it finds the bundled library at load time.
     install(CODE "
       set(_lib_dir \"\${CMAKE_INSTALL_PREFIX}/${TORCH_INSTALL_LIB_DIR}\")
