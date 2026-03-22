@@ -774,14 +774,30 @@ class BuiltinVariable(VariableTracker):
                     ]
                 )
 
-                def handler(
-                    tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
-                ) -> VariableTracker:
-                    return tx.inline_user_function_return(
-                        VariableTracker.build(tx, polyfill_fn_mapping[op]), [a, b], {}
-                    )
+                # Map operator function → dunder name (e.g. operator.eq → "__eq__")
+                _op_to_dunder = {v: k for k, v in cmp_name_to_op_mapping.items()}
+                dunder_op = _op_to_dunder[op]
 
-                result.append(((VariableTracker, VariableTracker), handler))
+                def make_richcompare_handler(
+                    dunder: str,
+                ) -> _HandlerCallback:
+                    def handler(
+                        tx: "InstructionTranslator",
+                        a: VariableTracker,
+                        b: VariableTracker,
+                    ) -> VariableTracker:
+                        from .user_defined import generic_richcompare
+
+                        return generic_richcompare(tx, a, b, dunder)
+
+                    return handler
+
+                result.append(
+                    (
+                        (VariableTracker, VariableTracker),
+                        make_richcompare_handler(dunder_op),
+                    )
+                )
                 return result
 
             result = [((ConstantVariable, ConstantVariable), compare_by_value)]
@@ -850,43 +866,15 @@ class BuiltinVariable(VariableTracker):
                     left: VariableTracker,
                     right: VariableTracker,
                 ) -> VariableTracker | None:
-                    # VT identity → Python identity
-                    if left is right:
-                        return VariableTracker.build(tx, op.__name__ == "is_")
+                    from .user_defined import vt_identity_compare
 
-                    # Compare underlying Python objects via hook
-                    left_val = left.get_real_python_backed_value()
-                    right_val = right.get_real_python_backed_value()
-
-                    left_known = left_val is not NO_SUCH_SUBOBJ
-                    right_known = right_val is not NO_SUCH_SUBOBJ
-
-                    if left_known and right_known:
-                        result = left_val is right_val
-                        return VariableTracker.build(
-                            tx, result if op.__name__ == "is_" else not result
-                        )
-
-                    # One side has a concrete value, the other doesn't — they
-                    # can't be identical (if they were the same object, both
-                    # sides would resolve).
-                    if left_known != right_known:
-                        return VariableTracker.build(tx, op.__name__ != "is_")
-
-                    # Mutable containers created during tracing: VT identity
-                    # = Python identity. Already False from `left is right`.
-                    if isinstance(left, (ConstDictVariable, ListVariable)):
-                        return VariableTracker.build(tx, op.__name__ != "is_")
-
-                    # Different exception types are never identical
-                    if (
-                        istype(left, variables.ExceptionVariable)
-                        and istype(right, variables.ExceptionVariable)
-                        and left.exc_type is not right.exc_type
-                    ):
-                        return VariableTracker.build(tx, op.__name__ != "is_")
-
-                    return None
+                    result = vt_identity_compare(tx, left, right)
+                    if result is None:
+                        return None
+                    is_same = result.as_python_constant()
+                    return VariableTracker.build(
+                        tx, is_same if op.__name__ == "is_" else not is_same
+                    )
 
                 result.append(((VariableTracker, VariableTracker), handle_is))  # type: ignore[arg-type]
 
@@ -3353,6 +3341,23 @@ class BuiltinVariable(VariableTracker):
 
     def is_python_equal(self, other: object) -> bool:
         return isinstance(other, variables.BuiltinVariable) and self.fn is other.fn
+
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        if other.is_python_constant():
+            try:
+                return ConstantVariable.create(
+                    cmp_name_to_op_mapping[op](
+                        self.as_python_constant(), other.as_python_constant()
+                    )
+                )
+            except Exception:
+                pass
+        return ConstantVariable.create(NotImplemented)
 
 
 @contextlib.contextmanager

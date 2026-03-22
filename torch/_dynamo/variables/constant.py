@@ -387,6 +387,25 @@ its type to `common_constant_types`.
     def get_real_python_backed_value(self) -> object:
         return self.value
 
+    def richcompare_impl(
+        self,
+        tx: Any,
+        other: "VariableTracker",
+        op: str,
+    ) -> "VariableTracker":
+        # CPython: object_richcompare / PyBaseObject_Type.tp_richcompare
+        # https://github.com/python/cpython/blob/main/Objects/typeobject.c
+        if other.is_python_constant():
+            try:
+                return ConstantVariable.create(
+                    cmp_name_to_op_mapping[op](
+                        self.as_python_constant(), other.as_python_constant()
+                    )
+                )
+            except Exception:
+                pass
+        return ConstantVariable.create(NotImplemented)
+
 
 CONSTANT_VARIABLE_NONE = ConstantVariable(None)
 CONSTANT_VARIABLE_TRUE = ConstantVariable(True)
@@ -428,6 +447,18 @@ class FakeIdVariable(VariableTracker):
         if isinstance(other, (FakeIdVariable, ConstantVariable)):
             return self.value == other.as_python_constant()
         return False
+
+    def richcompare_impl(
+        self, tx: Any, other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        # FakeIdVariable wraps an integer id; compare as integers
+        if not isinstance(other, (FakeIdVariable, ConstantVariable)):
+            return ConstantVariable.create(NotImplemented)
+        return ConstantVariable.create(
+            cmp_name_to_op_mapping[op](
+                self.as_python_constant(), other.as_python_constant()
+            )
+        )
 
     def reconstruct(self, codegen: Any) -> None:
         unimplemented(
@@ -506,3 +537,20 @@ class EnumVariable(VariableTracker):
             isinstance(other, VariableTracker)
             and self.as_python_constant() == other.as_python_constant()
         )
+
+    def richcompare_impl(
+        self,
+        tx: Any,
+        other: "VariableTracker",
+        op: str,
+    ) -> "VariableTracker":
+        if other.is_python_constant():
+            try:
+                return ConstantVariable.create(
+                    cmp_name_to_op_mapping[op](
+                        self.as_python_constant(), other.as_python_constant()
+                    )
+                )
+            except Exception:
+                pass
+        return ConstantVariable.create(NotImplemented)

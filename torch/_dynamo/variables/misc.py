@@ -543,12 +543,21 @@ class TracebackVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__eq__":
-            # Two traceback variables are only equal if they are the same object
-            return VariableTracker.build(tx, self is args[0])
-        elif name == "__setattr__":
+        if name == "__setattr__":
             return self.call_setattr(tx, *args)
         return super().call_method(tx, name, args, kwargs)
+
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        # CPython: tracebacks use identity-based comparison (object_richcompare)
+        # https://github.com/python/cpython/blob/main/Objects/typeobject.c
+        if op == "__eq__":
+            return VariableTracker.build(tx, self is other)
+        return ConstantVariable.create(NotImplemented)
 
 
 class ExceptionVariable(VariableTracker):
@@ -588,6 +597,15 @@ class ExceptionVariable(VariableTracker):
 
     def set_context(self, context: VariableTracker) -> None:
         self.__context__ = context
+
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        # CPython: BaseException uses identity comparison (object_richcompare)
+        return ConstantVariable.create(NotImplemented)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
@@ -697,7 +715,7 @@ class ExceptionVariable(VariableTracker):
         elif name == "__traceback__":
             return self.__traceback__
         elif name == "args":
-            return variables.ListVariable(list(self.args), source=self.source)
+            return variables.TupleVariable(list(self.args), source=self.source)
         return super().var_getattr(tx, name)
 
     def __str__(self) -> str:
@@ -1650,18 +1668,44 @@ class TypingVariable(VariableTracker):
         if name == "__getitem__" and len(args) == 1:
             new_typing = self.value[args[0].as_python_constant()]
             return TypingVariable(new_typing)
-        elif name == "__eq__":
-            if len(args) == 1 and not kwargs:
-                result = istype(args[0], TypingVariable) and self.value == args[0].value
-                return variables.ConstantVariable.create(result)
-        unimplemented(
-            gb_type="unsupported method call on `typing` variable",
-            context=f"typing variable: {self.value}, method name: {name}, args: {args}, kwargs: {kwargs}",
-            explanation=f"`torch.compile` does not support method call `{name}` on `typing` variable f{self.value}.",
-            hints=[
-                f"Avoid calling the {name} method on {self.value}.",
-                *graph_break_hints.SUPPORTABLE,
-            ],
+        return super().call_method(tx, name, args, kwargs)
+
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        # https://github.com/python/cpython/blob/main/Lib/typing.py
+        from .builder import SourcelessBuilder
+
+        if op not in ("__eq__", "__ne__"):
+            return variables.ConstantVariable.create(NotImplemented)
+
+        eq_method = type(self.value).__eq__
+        if hasattr(eq_method, "__code__"):
+            # Pure-Python __eq__ (e.g., typing._GenericAlias): trace into it directly
+            # instead of reimplementing the comparison logic here.
+            result = SourcelessBuilder.create(tx, eq_method).call_function(
+                tx, [self, other], {}
+            )
+            if op == "__ne__":
+                if result.is_python_constant():
+                    val = result.as_python_constant()
+                    if val is NotImplemented:
+                        return result
+                    return variables.ConstantVariable.create(not val)
+                return variables.ConstantVariable.create(NotImplemented)
+            return result
+
+        # C-extension __eq__ (e.g., types.GenericAlias): both values are known at
+        # trace time, so constant-fold.
+        if not istype(other, TypingVariable):
+            return variables.ConstantVariable.create(NotImplemented)
+        from ..utils import cmp_name_to_op_mapping
+
+        return variables.ConstantVariable.create(
+            cmp_name_to_op_mapping[op](self.value, other.value)  # type: ignore[attr-defined]
         )
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
