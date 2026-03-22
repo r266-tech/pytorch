@@ -81,6 +81,8 @@ Argument:
       type: List[List[int]]
     as_string_to_argument:
       type: Dict[str, Argument]
+    as_float_lists:
+      type: List[List[float]]
 ArgumentKind:
   kind: enum
   fields:
@@ -561,5 +563,5 @@ UserOutputSpec:
       type: Argument
 SCHEMA_VERSION:
 - 8
-- 18
+- 19
 TREESPEC_VERSION: 1

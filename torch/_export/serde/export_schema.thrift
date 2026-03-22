@@ -171,6 +171,7 @@ union Argument {
   270: list<list<TensorArgument>> as_nested_tensors;
   280: list<list<i64>> as_int_lists;
   290: map<string, Argument> as_string_to_argument;
+  300: list<list<double>> as_float_lists;
 }
 
 struct NamedArgument {
