@@ -28,9 +28,14 @@ def build_libtorch(rerun_cmake: bool, cmake_only: bool) -> None:
         args = [cmake]
         if shutil.which("ninja"):
             args += ["-GNinja"]
+        # Install into <repo_root>/torch so CI scripts (setup.bat) can find
+        # the headers, libraries, and cmake config at torch/{include,lib,share}.
+        install_prefix = REPO_ROOT / "torch"
+        install_prefix.mkdir(exist_ok=True)
         args += [
             "-DBUILD_PYTHON=OFF",
             f"-DPython_EXECUTABLE={sys.executable}",
+            f"-DCMAKE_INSTALL_PREFIX={install_prefix}",
             str(REPO_ROOT),
         ]
         print(" ".join(args), file=sys.stderr, flush=True)
